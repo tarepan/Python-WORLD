@@ -1,105 +1,101 @@
-# PYTHON WORLD VOCODER: 
-*************************************
+# PYTHON WORLD VOCODER
+Clone of *PYTHON WORLD VOCODER*.  
 
-This is a line-by-line implementation of WORLD vocoder (Matlab, C++) in python. It supports *python 3.0* and later.
+This is a line-by-line implementation of WORLD vocoder (Matlab, C++) in python.
 
-For technical detail, please check the [website](http://www.kki.yamanashi.ac.jp/~mmorise/world/english/).
+## Installation
 
-# INSTALATION
-*********************
-
-Python WORLD uses the following dependencies:
-
-* numpy, scipy
-* matplotlib
-* numba
-* simpleaudio (just for demonstration)
-
-Install python dependencies:
-
-```
+```bash
 pip install -r requirements.txt
 ```
 
-Or import the project with [PyCharm](https://www.jetbrains.com/pycharm/) and open ```requirements.txt``` in PyCharm. 
-It will ask to install the missing libraries by itself. 
+## Example
 
-# EXAMPLE
-**************
+For quick demo, run ```example/prodosy.py```:
+```bash
+python example.prosody
+```
 
-The easiest way to run those examples is to import the ```Python-WORLD``` folder into PyCharm.
+This demo contains analysis, modification (pitch, duration, spectrum) and synthesis.  
+Below is step-by-step examples.  
 
-In ```example/prodosy.py```, there is an example of analysis/modification/synthesis with WORLD vocoder. 
-It has some examples of pitch, duration, spectrum modification.
-
-First, we read an audio file:
+### Encode
+Prepare audio:  
 
 ```python
 from scipy.io.wavfile import read as wavread
-fs, x_int16 = wavread(wav_path)
-x = x_int16 / (2 ** 15 - 1) # to float
+wav_path = "path/to/your/audio.wav"
+fs, x_int16 = wavread(wav_path) # `fs`         - sampling frequency
+x = x_int16 / (2 ** 15 - 1)     # `x` :: float - speech signal
 ```
 
-Then, we declare a vocoder and encode the audio file:
+Then, decode the speech with `World` instance:
 
 ```python
 from world import main
 vocoder = main.World()
-# analysis
-dat = vocoder.encode(fs, x, f0_method='harvest')
+dat = vocoder.encode(fs, x, f0_method='dio') # `dat` - WORLD parameter dictionary (fo, spec, ap, etc...)
 ```
 
-in which, ```fs``` is sampling frequency and ```x``` is the speech signal.
-
-The ```dat``` is a dictionary object that contains pitch, magnitude spectrum, and aperiodicity. 
-
+### Manipulation
 We can scale the pitch:
 
 ```python
-dat = vocoder.scale_pitch(dat, 1.5)
+scale = 1.5 # Be careful when you scale the pich because there is upper limit and lower limit.
+dat = vocoder.scale_pitch(dat, scale)
 ```
-
-Be careful when you scale the pich because there is upper limit and lower limit.
 
 We can make speech faster or slower:
 
 ```python
-dat = vocoder.scale_duration(dat, 2)
+speed = 2.0
+dat = vocoder.scale_duration(dat, speed)
 ```
 
+### Decode
+todo
+
+### Speed Test
 In ```test/speed.py```, we estimate the time of analysis.
 
-To use d4c_requiem analysis and requiem_synthesis in WORLD version 0.2.2, set the variable ```is_requiem=True```:
+### Others
+To extract log-filterbanks, MCEP-40, VAE-12 as described in the paper `Using a Manifold Vocoder for Spectral Voice and Style Conversion`, check ```test/spectralFeatures.py```.  
+You need Keras 2.2.4 and TensorFlow 1.14.0 to extract VAE-12.  
+Check out [speech samples](https://tuanad121.github.io/samples/2019-09-15-Manifold/).  
+
+
+## Options
+
+Supported *fo* analysis methods:
+
+- `SWIPE`
+- `DIO`
+- `Harvest`: slowest (multi-core optimized by ```numba``` and ```python multiprocessing```)
+- Raw *f<sub>o</sub>* contour: any method you prefer
+
+You can use 'd4c requiem' mode (d4c_requiem analysis & requiem_synthesis in WORLD version 0.2.2):
 
 ```python
-# requiem analysis
 dat = vocoder.encode(fs, x, f0_method='harvest', is_requiem=True)
 ```
 
-To extract log-filterbanks, MCEP-40, VAE-12 as described in the paper `Using a Manifold Vocoder for Spectral Voice and Style Conversion`, check ```test/spectralFeatures.py```. You need Keras 2.2.4 and TensorFlow 1.14.0 to extract VAE-12.
-Check out [speech samples](https://tuanad121.github.io/samples/2019-09-15-Manifold/)
 
-# NOTE:
-**********
+## Note
 
-* The vocoder use pitch-synchronous analysis, the size of each window is determined by fundamental frequency ```F0```. The centers of the windows are equally spaced with the distance of ```frame_period``` ms.
+### pitch-synchronous analysis
+The vocoder use pitch-synchronous analysis, the size of each window is determined by fundamental frequency ```F0```.  
+The centers of the windows are equally spaced with the distance of ```frame_period``` ms.  
 
-* The Fourier transform size (```fft_size```) is determined automatically using sampling frequency and the lowest value of F0 ```f0_floor```. 
-When you want to specify your own ```fft_size```, you have to use ```f0_floor = 3.0 * fs / fft_size```. 
-If you decrease ```fft_size```, the ```f0_floor``` increases. But, a high ```f0_floor``` might be not good for the analysis of male voices.
+### Limit of Parameters
+You must satisfy equation `f0_floor = 3.0 * fs / fft_size`.  
+`f0_floor` is assumed lowest *f<sub>o</sub>*, `fs` is sampling frequency and `fft_size` is The Fourier transform size.  
 
-* The F0 analysis ```Harvest``` is the slowest one. It's speeded up using ```numba``` and ```python multiprocessing```. The more cores you have, the faster it can become. However, you can use your own F0 analysis. In our case, we support 3 F0 analysis: ```DIO, HARVEST, and SWIPE'```
+Under fixed `fs`, decrease of ```fft_size``` results in ```f0_floor``` increases.  
+But, a high ```f0_floor``` might be not good for the analysis of male voices.  
+So there is a kind of limitation in `fft_size`.  
 
 
-# CITATION:
-
-If you find the code helpful and want to cite it, please use:
-
+## CITATION
+```
 Dinh, T., Kain, A., & Tjaden, K. (2019). Using a manifold vocoder for spectral voice and style conversion. Proceedings of the Annual Conference of the International Speech Communication Association, INTERSPEECH, 2019-September, 1388-1392.
-
-
-# CONTACT US
-******************
-
-
-Post your questions, suggestions, and discussions to GitHub Issues.
+```
