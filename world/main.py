@@ -111,7 +111,7 @@ class World(object):
 
         :param fs: sample frequency
         :param x: signal
-        :param f0_method: f0 extraction method: dio, harvest
+        :param f0_method: f0 extraction method: dio, harvest, swipe
         :param f0_floor: smallest f0
         :param f0_ceil: largest f0
         :param channels_in_octave: number of channels per octave
@@ -120,7 +120,18 @@ class World(object):
         :param allowed_range:
         :param fft_size: length of Fourier transform
         :return: a dictionary contains WORLD components
+            temporal_positions
+            vuv
+            fs
+            f0
+            aperiodicity
+            'ps spectrogram'
+            spectrogram
+            is_requiem
+
         '''
+        #### fo extraction ########################################################
+        # dio | harvest | swipe
         if fft_size != None:
             f0_floor = 3.0 * fs / fft_size
         if f0_method == 'dio':
@@ -135,12 +146,17 @@ class World(object):
             source = swipe(fs, x, plim=[f0_floor, f0_ceil], sTHR=0.3)
         else:
             raise Exception
+
+        #### spec extraction ######################################################
         filter = cheaptrick(x, fs, source, fft_size=fft_size)
+
+        #### ap extraction ########################################################
         if is_requiem:
             source = d4cRequiem(x, fs, source, fft_size=fft_size)
         else:
             source = d4c(x, fs, source, fft_size_for_spectrum=fft_size)
 
+        #### Output dict ##########################################################
         return {'temporal_positions': source['temporal_positions'],
                 'vuv': source['vuv'],
                 'fs': filter['fs'],

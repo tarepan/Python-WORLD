@@ -23,13 +23,15 @@ def synthesis(source_object, filter_object):
     Waveform synthesis from the estimated parameters
     y = Synthesis(source_object, filter_object)
     
-    Inputs
-    source_object : F0 and aperiodicity
-    filter_object : spectral envelope
-    Output
-    y : synthesized waveform
-    
+    Args:
+        source_object - WORLD dict containing vuv/f0/temporal_positions/aperiodicity
+        filter_object - WORLD dict containing fs/spectrogram
+    Returns:
+        y - synthesized waveform    
     '''
+    # NOTE: Intended to be called by `World.decode` internally.
+    # Actually, source_object === filter_object in `World.decode`.
+
     default_f0 = 500
     vuv = source_object['vuv']
     f0 = source_object['f0']
@@ -51,6 +53,7 @@ def synthesis(source_object, filter_object):
                                        fill_value='extrapolate')(pulse_locations)
     temporal_position_index = np.maximum(1, np.minimum(len(temporal_positions), temporal_position_index))
     
+    # NOTE: periodic + aperiodic = 1
     amplitude_aperiodic = source_object['aperiodicity'] ** 2
     amplitude_periodic = np.maximum(0.001, (1 - amplitude_aperiodic))
 
@@ -59,56 +62,80 @@ def synthesis(source_object, filter_object):
     coefficient = 2.0 * np.pi * fs / fft_size
     
     for i in range(len(pulse_locations_index)):
+        # NOTE: spec/periodic/aperiodic -> its slice
         spectrum_slice, periodic_slice, aperiodic_slice = \
             get_spectral_parameters(temporal_positions, temporal_position_index[i],
                                     spectrogram, amplitude_periodic, amplitude_aperiodic, pulse_locations[i])
 
+        # TODO: Understand meaning. This seems to be basic component
         noise_size = pulse_locations_index[min(len(pulse_locations_index) - 1, i + 1)] - pulse_locations_index[i]
         output_buffer_index = np.maximum(1, np.minimum(y_length, pulse_locations_index[i] + base_index))
         
         if interpolated_vuv[pulse_locations_index[i] - 1] >= 0.5 and aperiodic_slice[0] <= 0.999:
+            # NOTE: (maybe) periodic components
+            ## NOTE: (maybe) Calculate corrected FIR filter coefficients
             response = get_periodic_response(spectrum_slice, periodic_slice,
                                              fft_size, latter_index, pulse_locations_time_shift[i], coefficient)
             dc_remover = dc_remover_base * -np.sum(response)
             periodic_response = response + dc_remover
+            ## NOTE: (maybe)
             y[output_buffer_index.astype(int) - 1] += periodic_response * np.sqrt(max(1, noise_size))
+
+        # NOTE: aperiodic components
+            ## NOTE: weighting
             tmp_aperiodic_spectrum = spectrum_slice * aperiodic_slice
         else:
+            ## NOTE: (maybe) weighting with 1 (>=0.999)
             tmp_aperiodic_spectrum = spectrum_slice
-    
+        ## NOTE: Spectrum flooring
         tmp_aperiodic_spectrum[tmp_aperiodic_spectrum == 0] = sys.float_info.epsilon
+        ## NOTE: Signal Synthesis
         aperiodic_response = get_aperiodic_response(tmp_aperiodic_spectrum, fft_size, latter_index, noise_size)
+        ## NOTE: Add to Output
         y[output_buffer_index.astype(int) - 1] += aperiodic_response
     return y
 
 #####################################################
 
 def get_aperiodic_response(tmp_aperiodic_spectrum, fft_size, latter_index, noise_size):
+    """Generate an aperiodic signal by given spectrum + sampled noise."""
+
     aperiodic_spectrum = np.r_[tmp_aperiodic_spectrum, tmp_aperiodic_spectrum[-2: 0: -1]]
+    # NOTE: spec-to-ceps
     tmp_cepstrum = np.fft.fft((np.log(np.abs(aperiodic_spectrum)) / 2)).real
+    # NOTE: Liftering or something...? zeros -> cep*2 for some elements except for [0] & *1 for [0]
     tmp_complex_cepstrum = np.zeros(fft_size)
     tmp_complex_cepstrum[latter_index.astype(int) - 1] = tmp_cepstrum[latter_index.astype(int) - 1] * 2
     tmp_complex_cepstrum[0] = tmp_cepstrum[0]
+    # NOTE: ceps-to-spec
     response = np.fft.fftshift(np.fft.ifft(np.exp(np.fft.ifft(tmp_complex_cepstrum))).real)
     noise_input = np.random.randn(max(3, noise_size))
     # noise_input = np.zeros(max(3, noise_size)) + 0.1
+    # NOTE: Apply `response` IIR filter to the white noise
     response = fftfilt(noise_input - np.mean(noise_input), response)
     return response
 
 #######################################################
 
 def get_periodic_response(spectrum_slice, periodic_slice, fft_size, latter_index, fractionsl_time_shift, coefficient):
+    """Generate FIR filter coefficients.
+    
+    Returns:
+        response - FIR filter coefficients
+    """
     tmp_spectrum_slice = spectrum_slice * periodic_slice
     tmp_spectrum_slice[tmp_spectrum_slice == 0] = sys.float_info.epsilon
 
     periodic_spectrum = np.r_[tmp_spectrum_slice, tmp_spectrum_slice[-2: 0: -1]]
-
+    # NOTE: Same as aperiodic
+    # NOTE: Liftering or something...? zeros -> cep*2 for some elements except for [0] & *1 for [0]
     tmp_cepstrum = np.fft.fft(np.log(np.abs(periodic_spectrum)) / 2).real
     tmp_complex_cepstrum = np.zeros(fft_size)
     tmp_complex_cepstrum[latter_index.astype(int) - 1] = tmp_cepstrum[latter_index.astype(int) - 1] * 2
     tmp_complex_cepstrum[0] = tmp_cepstrum[0]
 
     spectrum = np.exp(np.fft.ifft(tmp_complex_cepstrum))
+    # NOTE: Different from aperiodic
     spectrum = spectrum[0: int(fft_size / 2) + 1]
     spectrum *= np.exp(-1j * coefficient * fractionsl_time_shift * np.arange(int(fft_size / 2) + 1))
     spectrum = np.r_[spectrum, spectrum[-2: 0: -1].conj()]
@@ -143,6 +170,17 @@ def time_base_generation(temporal_positions, f0, fs, vuv, signal_time, default_f
 #####################################################
 def get_spectral_parameters(temporal_positions, temporal_position_index,
                             spectrogram, amplitude_periodic, amplitude_random, pulse_locations):
+    """(maybe) Get slice of spectrogram/periodicity/aperiodicity
+
+    Args:
+        spectrogram
+        amplitude_periodic -  Periodicity
+        amplitude_random   - Aperiodicity
+    Returns:
+        spectrum_slice  - slice of spectrogram
+        periodic_slice  - slice of amplitude_periodic
+        aperiodic_slice - slice of amplitude_random
+    """
     floor_index = int(np.floor(temporal_position_index)) - 1
     ceil_index  = int(np.ceil(temporal_position_index)) - 1
     t1 = temporal_positions[floor_index]
@@ -187,21 +225,24 @@ def nextpow2(x):
 
 ######################################
 def fftfilt(b, x, *n):
-    """Filter the signal x with the FIR filter described by the
-    coefficients in b using the overlap-add method. If the FFT
-    length n is not specified, it and the overlap-add block length
-    are selected so as to minimize the computational cost of
-    the filtering operation."""
+    """
+    Apply FIR filter to the signal using the overlap-add method.
+    If the FFT length is not specified, it and the overlap-add block length are selected so as to minimize the computational cost of the filtering operation.
+
+    Args:
+        b - FIR filter's coefficients
+        x - the signal
+        n - FFT length
+    Returns:
+
+    """
 
     N_x = len(x)
     N_b = len(b)
 
-    # Determine the FFT length to use:
+    #### Determine the FFT length `N_fft` #########################################
     if len(n):
-
-        # Use the specified FFT length (rounded up to the nearest
-        # power of 2), provided that it is no less than the filter
-        # length:
+        # Use the specified FFT length (rounded up to the nearest power of 2), provided that it is no less than the filter length:
         n = n[0]
         if n != int(n) or n <= 0:
             raise ValueError('n must be a nonnegative integer')
@@ -209,7 +250,6 @@ def fftfilt(b, x, *n):
             n = N_b
         N_fft = 2**nextpow2(n)
     else:
-
         if N_x > N_b:
 
             # When the filter length is smaller than the signal,
@@ -224,14 +264,12 @@ def fftfilt(b, x, *n):
             cost = np.ceil(N_x/(N-N_b+1))*N*(np.log2(N)+1)
             assert len(cost) > 0
             N_fft = N[np.argmin(cost)]
-
         else:
-
             # When the filter length is at least as long as the signal,
             # filter the signal using a single block:
             N_fft = 2**nextpow2(N_b+N_x-1)
-
     N_fft = int(N_fft)
+    #### /Determine the FFT length `N_fft` ########################################
 
     # Compute the block length:
     L = int(N_fft - N_b + 1)

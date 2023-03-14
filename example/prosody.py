@@ -7,6 +7,7 @@ from scipy import signal
 
 from world import main
 
+# NOTE: Load audio
 wav_path = Path('../test/test-mwm.wav')
 print(wav_path)
 fs, x_int16 = wavread(wav_path)
