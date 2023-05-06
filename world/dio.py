@@ -15,19 +15,29 @@ def dio(x, fs, f0_floor=71, f0_ceil=800, channels_in_octave=2, target_fs=4000, f
     + Select highest reliable candidates
     f0_parameter = Dio(x, fs, f0_ceil, channels_in_octave, target_fs, frame_period, allowed_range);
     
-    Inputs
-    x  : input signal
-    fs : sampling frequency
-    other settings : f0_floor (Hz), f0_ceil (Hz), target_fs (Hz)
-             channels_in_octave (ch), allowed_range, and frame_period (ms)
+    Args:
+        x                            - Input signal
+        fs                           - Sampling frequency
+        f0_floor                     - [Hz]
+        f0_ceil                      - [Hz]
+        channels_in_octave           - (ch)
+        target_fs                    - [Hz]
+        frame_period       :: number - Length of single frame [ms]
+        allowed_range
     Output
-        f0 infromation
-        vuv - Voiced if fo is not 0
+        f0
+        f0_candidates
+        raw_f0_candidates
+        temporal_positions :: [float] - Times of data-points [sec]
+        vuv                           - Voiced if fo is not 0
 
     Caution: minimum frame_period is 1.
     '''
+    # num_samples - The number of frames corresponding to x
     num_samples = int(1000 * len(x) / fs / frame_period + 1)
+    # Times of data-points [sec]
     temporal_positions = np.arange(0, num_samples) * frame_period / 1000
+
     #temporal_positions = np.arange(0, np.size(x) / fs, frame_period / 1000) #careful!! check later
     # log2(f0_ceil / f0_floor) = number of octaves
     boundary_f0_list = np.arange(math.ceil(np.log2(f0_ceil / f0_floor) * channels_in_octave)) + 1
@@ -98,6 +108,8 @@ def get_candidate_and_stability(number_of_frames, boundary_f0_list, y_length, te
                                 actual_fs, y_spectrum, f0_floor, f0_ceil):
     """Second step: Caculate F0 candidates and F0 stability
 
+    Args:
+        temporal_positions :: [float] - Times of data-points [sec]
     Returns:
         raw_f0_candidate - Candidate fo in all bands
         raw_f0_stability - Stability of each candidates
@@ -137,7 +149,7 @@ def get_raw_event(boundary_f0, fs, y_spectrum, y_length, temporal_positions, f0_
         fs
         y_spectrum
         y_length
-        temporal_positions
+        temporal_positions :: [float] - Times of data-points [sec]
         f0_floor
         f0_ceil
     Returns:
@@ -172,6 +184,11 @@ def get_raw_event(boundary_f0, fs, y_spectrum, y_length, temporal_positions, f0_
 
 ##########################################################################################################
 def get_f0_candidates(neg_loc, neg_f0, pos_loc, pos_f0, peak_loc, peak_f0, dip_loc, dip_f0, temporal_positions):
+    """
+    Args:
+
+        temporal_positions :: [float] - Times of data-points [sec]
+    """
     #test this one - Whether all 4 events detected or not
     usable_channel = max(0, np.size(neg_loc) - 2) * \
                      max(0, np.size(pos_loc) - 2) * \
